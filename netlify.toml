@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Opcional: redirecciones para manejar rutas en tu SPA (React/Vite Router)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
