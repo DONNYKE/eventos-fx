@@ -1,9 +1,17 @@
 [build]
-  command = "npm run build"
+  command = "npm run build:vite"
   publish = "dist"
 
-# Opcional: redirecciones para manejar rutas en tu SPA (React/Vite Router)
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--no-fund --no-audit"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
