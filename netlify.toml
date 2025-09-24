@@ -1,17 +1,6 @@
-[build]
-  command = "npm run build:vite"
-  publish = "dist"
+[functions]
+  node_bundler = "esbuild"
 
-[build.environment]
-  NODE_VERSION = "20"
-  NPM_FLAGS = "--no-fund --no-audit"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
+[[scheduled.functions]]
+  name = "run-scheduler"
+  cron = "0 14 * * *"
