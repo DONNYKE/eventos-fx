@@ -4,3 +4,8 @@
 [[scheduled.functions]]
   name = "run-scheduler"
   cron = "0 14 * * *"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
