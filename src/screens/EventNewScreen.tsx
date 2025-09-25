@@ -1,3 +1,4 @@
+// src/screens/EventNewScreen.tsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -16,17 +17,14 @@ function toLocalInputValue(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-const DEFAULT_ZONES = ["GENERAL", "VIP"];
-
 export default function EventNewScreen() {
   const nav = useNavigate();
 
   // form state
   const [name, setName] = React.useState("");
   const [venue, setVenue] = React.useState("");
-  const [zonesText, setZonesText] = React.useState(DEFAULT_ZONES.join(","));
 
-  // fecha/hora (datetime-local)
+  // fecha/hora (solo inicio)
   const now = React.useMemo(() => new Date(), []);
   const defaultStart = React.useMemo(() => {
     const d = new Date(now);
@@ -34,16 +32,7 @@ export default function EventNewScreen() {
     d.setSeconds(0, 0);
     return toLocalInputValue(d);
   }, [now]);
-
-  const defaultEnd = React.useMemo(() => {
-    const d = new Date(now);
-    d.setMinutes(d.getMinutes() + 60 + 180); // fin 3h después del inicio por defecto
-    d.setSeconds(0, 0);
-    return toLocalInputValue(d);
-  }, [now]);
-
   const [startAt, setStartAt] = React.useState(defaultStart);
-  const [endAt, setEndAt] = React.useState(defaultEnd);
 
   // flyer
   const [file, setFile] = React.useState<File | null>(null);
@@ -67,12 +56,14 @@ export default function EventNewScreen() {
     setError(null);
     setOkMsg(null);
 
-    // Validaciones
-    if (!name.trim())         return setError("Ingresa el nombre del evento.");
-    if (!startAt)             return setError("Selecciona fecha y hora de inicio.");
-    if (!start_iso) return setError("Fecha/hora de inicio inválida.");
-// Eliminamos fin y zonas porque no existen en la tabla
+    // Validaciones mínimas
+    const titleSafe = (name ?? "").toString().trim();
+    const locationSafe = (venue ?? "").toString().trim();
+    if (!titleSafe) { setError("Ingresa el TÍTULO del evento."); return; }
+    if (!startAt)   { setError("Selecciona FECHA y HORA de inicio."); return; }
 
+    const start_iso = toISOFromLocalInput(startAt);
+    if (!start_iso) { setError("Fecha/hora de inicio inválida."); return; }
 
     setSubmitting(true);
     try {
@@ -82,22 +73,25 @@ export default function EventNewScreen() {
       const userId = sess.session.user.id;
 
       // 1) Crear evento SIN flyer aún
+      const payload = {
+        title: titleSafe,                     // columna real en DB
+        location: locationSafe || null,       // columna real en DB
+        start_at: start_iso,                  // ISO UTC
+        is_active: true,
+        created_by: userId,
+      };
+      console.log("INSERT events payload:", payload);
+
       const { data: ev, error: insErr } = await supabase
-  .from("events")
-  .insert({
-    title: name.trim(),                 // <- antes name
-    location: venue.trim() || null,     // <- antes venue
-    start_at: start_iso,                // OK
-    is_active: true,                    // opcional, default true
-    created_by: userId,                 // OK
-  })
-  .select("id")
-  .single();
+        .from("events")
+        .insert(payload)
+        .select("id")
+        .single();
 
       if (insErr) throw insErr;
       const eventId = ev!.id as string;
 
-      // 2) Subir flyer (opcional)
+      // 2) Subir flyer (opcional) → guardar en banner_url
       if (file) {
         const safeName = file.name.replace(/\s+/g, "_");
         const path = `${eventId}/${Date.now()}_${safeName}`;
@@ -111,10 +105,9 @@ export default function EventNewScreen() {
         const publicUrl = supabase.storage.from("event-flyers").getPublicUrl(path).data.publicUrl;
 
         const { error: updErr } = await supabase
-  .from("events")
-  .update({ banner_url: publicUrl }) // tu columna real
-  .eq("id", eventId);
-
+          .from("events")
+          .update({ banner_url: publicUrl }) // columna real en DB
+          .eq("id", eventId);
 
         if (updErr) throw updErr;
       }
@@ -137,19 +130,20 @@ export default function EventNewScreen() {
       <h1 className="text-xl font-bold mb-3">Crear evento</h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Nombre */}
+        {/* Título */}
         <div>
-          <label className="block text-sm mb-1">Nombre</label>
+          <label className="block text-sm mb-1">Título</label>
           <input
             className="w-full border px-3 py-2 rounded-xl"
             placeholder="Ej. Fiesta Aniversario"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={submitting}
+            required
           />
         </div>
 
-        {/* Lugar */}
+        {/* Lugar (opcional) */}
         <div>
           <label className="block text-sm mb-1">Lugar</label>
           <input
@@ -161,47 +155,20 @@ export default function EventNewScreen() {
           />
         </div>
 
-        {/* Fecha y hora */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm mb-1">Inicio (fecha y hora)</label>
-            <input
-              type="datetime-local"
-              className="w-full border px-3 py-2 rounded-xl"
-              value={startAt}
-              onChange={(e) => setStartAt(e.target.value)}
-              min={minLocal}
-              disabled={submitting}
-            />
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Fin (fecha y hora)</label>
-            <input
-              type="datetime-local"
-              className="w-full border px-3 py-2 rounded-xl"
-              value={endAt}
-              onChange={(e) => setEndAt(e.target.value)}
-              min={startAt || minLocal}
-              disabled={submitting}
-            />
-          </div>
-        </div>
-        <p className="text-xs text-gray-500 -mt-2">
-          Las horas se guardan en UTC (ISO). Lo que ves aquí está en tu zona horaria local.
-        </p>
-
-        {/* Zonas */}
+        {/* Fecha y hora de inicio */}
         <div>
-          <label className="block text-sm mb-1">Zonas (separadas por coma)</label>
+          <label className="block text-sm mb-1">Inicio (fecha y hora)</label>
           <input
+            type="datetime-local"
             className="w-full border px-3 py-2 rounded-xl"
-            placeholder="GENERAL, VIP"
-            value={zonesText}
-            onChange={(e) => setZonesText(e.target.value)}
+            value={startAt}
+            onChange={(e) => setStartAt(e.target.value)}
+            min={minLocal}
             disabled={submitting}
+            required
           />
           <p className="text-xs text-gray-500 mt-1">
-            Se guardan como arreglo JSON: ej. <code>["GENERAL","VIP"]</code>
+            Se guarda en UTC (ISO). Lo que ves aquí está en tu zona horaria local.
           </p>
         </div>
 
@@ -235,9 +202,7 @@ export default function EventNewScreen() {
 
       <div className="mt-4 text-xs text-gray-500">
         <p>
-          Requisitos: bucket <code>event-flyers</code> en Storage con policies para que
-          ADMIN pueda subir/actualizar, y RLS en <code>events</code> que permita INSERT
-          a ADMIN.
+          Requisitos: bucket <code>event-flyers</code> en Storage y RLS que permita INSERT a admin.
         </p>
       </div>
     </div>
