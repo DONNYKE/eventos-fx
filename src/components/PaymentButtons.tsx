@@ -1,5 +1,5 @@
 import React from "react";
-import type { PaymentMethod } from "../lib/api";
+type PaymentMethod = string;
 
 
 export const PaymentButtons: React.FC<{

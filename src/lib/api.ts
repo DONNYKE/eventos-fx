@@ -1,40 +1,60 @@
-export type PaymentMethod = "EFECTIVO" | "YAPE" | "PLIN" | "CULQI" | "MP";
+// src/lib/api.ts
+import { supabase } from "./supabaseClient";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 
-export async function issueQrToken(ticketId: string) {
-const token = await getAccessToken();
-if (!token) throw new Error("No autenticado");
-const url = `${SUPABASE_URL}/functions/v1/issue-qr-token`;
-const res = await fetch(url, {
-method: "POST",
-headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-body: JSON.stringify({ ticketId })
-});
-if (!res.ok) throw new Error(await res.text());
-return res.json() as Promise<{ ok: boolean; qr: string; jti: string; exp_at: string }>;
+/**
+ * Devuelve el access_token del usuario autenticado
+ * (necesario para autorizar llamadas a Edge Functions).
+ */
+async function getAccessToken(): Promise<string> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const token = data.session?.access_token;
+  if (!token) throw new Error("No hay sesión activa");
+  return token;
 }
 
+/**
+ * Llama a la Edge Function que emite un token de QR
+ * Debe responder algo como: { qr: string, exp_at: string }
+ */
+export async function issueQrToken(ticketId: string) {
+  const token = await getAccessToken();
+  const url = `${SUPABASE_URL}/functions/v1/issue-qr-token`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ticketId }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`issue-qr-token failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
 
-export async function validateCheckin(params: {
-qr: string;
-deviceId: string;
-markPayment?: { method: PaymentMethod; amount: number };
-}) {
-const token = await getAccessToken();
-if (!token) throw new Error("No autenticado");
-const url = `${SUPABASE_URL}/functions/v1/validate-checkin`;
-const res = await fetch(url, {
-method: "POST",
-headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-body: JSON.stringify(params)
-});
-if (!res.ok) throw new Error(await res.text());
-return res.json() as Promise<{
-ok: boolean;
-ticket_id: string;
-user_id: string;
-payment_status: "PENDING" | "PAID" | "WAIVED";
-checkin_at: string;
-payment?: any;
-}>;
+/**
+ * Llama a la Edge Function que valida un check-in
+ * (ejemplo: { ok: true } o { ok: false, reason: '...' })
+ */
+export async function validateCheckin(qrPayload: unknown) {
+  const token = await getAccessToken();
+  const url = `${SUPABASE_URL}/functions/v1/validate-checkin`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ qr: qrPayload }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`validate-checkin failed: ${res.status} ${text}`);
+  }
+  return res.json();
 }

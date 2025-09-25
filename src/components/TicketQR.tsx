@@ -1,5 +1,5 @@
-import React from "react";
-import QRCode from "qrcode";
+import { useEffect, useState } from "react";
+import * as QRCode from "qrcode";
 import { issueQrToken } from "../lib/api";
 
 interface TicketQRProps {
@@ -8,19 +8,18 @@ interface TicketQRProps {
   status?: "PENDING" | "PAID" | "WAIVED";
 }
 
-export const TicketQR: React.FC<TicketQRProps> = ({ ticketId, eventName, status }) => {
-  const [qrText, setQrText] = React.useState<string>("");
-  const [svg, setSvg] = React.useState<string>("");
-  const [expAt, setExpAt] = React.useState<string>("");
-  const [loading, setLoading] = React.useState<boolean>(false);
-  const [error, setError] = React.useState<string>("");
+export default function TicketQR({ ticketId, eventName, status }: TicketQRProps) {
+  const [svg, setSvg] = useState<string>("");
+  const [expAt, setExpAt] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>("");
 
-  const generate = async () => {
+  async function generate() {
     try {
       setLoading(true);
       setError("");
+      // Tu Edge Function debe responder { qr, exp_at }
       const res = await issueQrToken(ticketId);
-      setQrText(res.qr);
       setExpAt(res.exp_at);
       const svgString = await QRCode.toString(res.qr, { type: "svg", margin: 0 });
       setSvg(svgString);
@@ -29,11 +28,23 @@ export const TicketQR: React.FC<TicketQRProps> = ({ ticketId, eventName, status 
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  React.useEffect(() => {
+  // Genera al montar o cuando cambie el ticket
+  useEffect(() => {
     if (ticketId) generate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
+
+  // Refresco automático 30s antes del vencimiento
+  useEffect(() => {
+    if (!expAt) return;
+    const ms = new Date(expAt).getTime() - Date.now() - 30_000;
+    if (ms <= 0) return;
+    const t = setTimeout(() => generate(), ms);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expAt]);
 
   return (
     <div className="w-full max-w-sm mx-auto p-4 rounded-2xl shadow bg-white">
@@ -46,7 +57,7 @@ export const TicketQR: React.FC<TicketQRProps> = ({ ticketId, eventName, status 
         {svg ? (
           <div dangerouslySetInnerHTML={{ __html: svg }} />
         ) : (
-          <div className="text-sm">{loading ? "Generando..." : "Toca actualizar"}</div>
+          <div className="text-sm">{loading ? "Generando…" : "Toca actualizar"}</div>
         )}
       </div>
 
@@ -68,11 +79,11 @@ export const TicketQR: React.FC<TicketQRProps> = ({ ticketId, eventName, status 
           disabled={loading}
           className="flex-1 py-2 rounded-xl bg-black text-white hover:opacity-90"
         >
-          {loading ? "Actualizando..." : "Actualizar QR"}
+          {loading ? "Actualizando…" : "Actualizar QR"}
         </button>
       </div>
 
       {error && <p className="mt-2 text-red-600 text-sm">{error}</p>}
     </div>
   );
-};
+}

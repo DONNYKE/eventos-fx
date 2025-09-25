@@ -1,6 +1,6 @@
 import React from "react";
 import { supabase } from "../lib/supabaseClient";
-import { TicketQR } from "../components/TicketQR";
+import TicketQR from "../components/TicketQR";
 
 export const MyPassScreen: React.FC = () => {
   const [loading, setLoading] = React.useState(true);

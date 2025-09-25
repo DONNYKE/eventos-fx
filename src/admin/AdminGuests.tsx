@@ -1,49 +1,32 @@
-// src/admin/AdminGuests.tsx
-import React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
+type EventRow = { id: string; name: string; start_at: string | null; flyer_url?: string | null };
 type TicketRow = {
   id: string;
-  payment_status: "PENDING" | "PAID" | "WAIVED";
-  checkin_status: "NONE" | "CHECKED_IN" | null;
+  event_id: string;
+  user_id: string | null;
+  payment_status: "PAID" | "PENDING" | "FREE" | string | null;
+  checkin_status: "CHECKED_IN" | "NONE" | "REJECTED" | string | null;
   price: number | null;
-  duty: string | null;
-  duty_note: string | null;
-  user_id: string;
-  profiles: {
-    full_name: string | null;
-    phone_e164: string | null;
-  } | null;
+  events?: { name: string; start_at: string }[] | null;
+  profiles?: { full_name: string | null; phone_e164: string | null }[] | null;
 };
 
-const DUTIES = [
-  "",
-  "INGRESO",
-  "LOGISTICA",
-  "BAR",
-  "SONIDO",
-  "SEGURIDAD",
-  "HOST",
-  "FOTO",
-  "VIDEO",
-  "OTRO",
-];
-
 export default function AdminGuests() {
-  const [loading, setLoading] = React.useState(true);
-  const [event, setEvent] = React.useState<any>(null);
-  const [rows, setRows] = React.useState<TicketRow[]>([]);
-  const [q, setQ] = React.useState("");
-  const [filterPay, setFilterPay] = React.useState<"" | "PAID" | "PENDING" | "WAIVED">("");
-  const [filterCheck, setFilterCheck] = React.useState<"" | "CHECKED_IN" | "NONE">("");
-  const [filterDuty, setFilterDuty] = React.useState<string>("");
-  const [savingId, setSavingId] = React.useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [event, setEvent] = useState<EventRow | null>(null);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
+  const [filter, setFilter] = useState<"ALL" | "PAID" | "CHECKED_IN">("ALL");
 
-  const load = React.useCallback(async () => {
+  // 🔧 refs tipados (sin callback-ref)
+  const dutyRef = useRef<HTMLSelectElement>(null);
+  const noteRef = useRef<HTMLInputElement>(null);
+
+  async function load() {
     setLoading(true);
-
-    // Escoge el evento más próximo desde hace 7 días en adelante
     const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
     const { data: evs, error: evErr } = await supabase
       .from("events")
       .select("id,name,start_at,flyer_url")
@@ -54,237 +37,141 @@ export default function AdminGuests() {
     if (evErr) {
       console.error(evErr);
       setEvent(null);
-      setRows([]);
+      setTickets([]);
       setLoading(false);
       return;
     }
 
-    const ev = evs?.[0] ?? null;
-    setEvent(ev);
+    const ev = evs?.[0] as EventRow | undefined;
+    setEvent(ev ?? null);
 
-    if (!ev) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
+    if (ev) {
+      const { data: tks, error: tkErr } = await supabase
+        .from("tickets")
+        .select(
+          "id,event_id,user_id,payment_status,checkin_status,price, events(name,start_at), profiles(full_name,phone_e164)"
+        )
+        .eq("event_id", ev.id)
+        .order("id", { ascending: true });
 
-    // Trae los tickets con perfil
-    const { data, error } = await supabase
-      .from("tickets")
-      .select(
-        "id,payment_status,checkin_status,price,duty,duty_note,user_id,profiles(full_name,phone_e164)"
-      )
-      .eq("event_id", ev.id)
-      .order("created_at", { ascending: false })
-      .limit(2000);
-
-    if (error) {
-      console.error(error);
-      setRows([]);
+      if (tkErr) console.error(tkErr);
+      setTickets((tks as TicketRow[]) ?? []);
     } else {
-      setRows((data as unknown as TicketRow[]) ?? []);
+      setTickets([]);
     }
+
     setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  React.useEffect(() => {
+  const filtered = useMemo(() => {
+    if (filter === "PAID") return tickets.filter((t) => t.payment_status === "PAID");
+    if (filter === "CHECKED_IN") return tickets.filter((t) => t.checkin_status === "CHECKED_IN");
+    return tickets;
+  }, [tickets, filter]);
+
+  async function assignDutyAndNote(ticketId: string) {
+    const duty = dutyRef.current?.value ?? "";
+    const admin_note = noteRef.current?.value ?? "";
+
+    // Ajusta columnas si tu tabla usa otros nombres
+    const { error } = await supabase.from("tickets").update({ duty, admin_note }).eq("id", ticketId);
+    if (error) {
+      console.error(error);
+      alert("No se pudo guardar la responsabilidad / nota");
+      return;
+    }
+    alert("Responsabilidad / nota guardadas");
     load();
-  }, [load]);
-
-  const filtered = rows.filter((r) => {
-    const term = q.trim().toLowerCase();
-    if (term) {
-      const name = (r.profiles?.full_name ?? "").toLowerCase();
-      const phone = (r.profiles?.phone_e164 ?? "").toLowerCase();
-      if (!name.includes(term) && !phone.includes(term)) return false;
-    }
-    if (filterPay && r.payment_status !== filterPay) return false;
-    if (filterCheck) {
-      const ck = r.checkin_status ?? "NONE";
-      if (ck !== filterCheck) return false;
-    }
-    if (filterDuty && (r.duty ?? "") !== filterDuty) return false;
-    return true;
-  });
-
-  const badge = (txt: string, cls: string) => (
-    <span className={`px-2 py-1 rounded-full text-xs ${cls}`}>{txt}</span>
-  );
-
-  const saveDuty = async (row: TicketRow, nextDuty: string, nextNote: string) => {
-    try {
-      setSavingId(row.id);
-      const payload: Partial<TicketRow> = {
-        duty: nextDuty || null,
-        duty_note: nextNote?.trim() || null,
-      };
-      const { error } = await supabase.from("tickets").update(payload).eq("id", row.id);
-      if (error) throw error;
-
-      // Actualiza local
-      setRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, duty: payload.duty ?? null, duty_note: payload.duty_note ?? null } : r))
-      );
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message ?? "No se pudo guardar la responsabilidad.");
-    } finally {
-      setSavingId(null);
-    }
-  };
+  }
 
   return (
-    <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-start gap-3">
+    <div className="space-y-4">
+      {/* encabezado */}
+      <div className="p-4 rounded-2xl border bg-white flex items-start gap-3">
         <div className="flex-1">
-          <div className="text-sm text-gray-500">Evento</div>
-          <div className="font-semibold">
-            {event ? event.name : "–"}
-          </div>
+          <div className="text-sm text-gray-500">Invitados</div>
+          <div className="font-semibold">{event ? event.name : "Sin evento activo"}</div>
           {event?.start_at && (
-            <div className="text-xs text-gray-500">
-              {new Date(event.start_at).toLocaleString()}
-            </div>
+            <div className="text-xs text-gray-500">{new Date(event.start_at).toLocaleString()}</div>
           )}
         </div>
-        <button
-          className="px-3 py-2 rounded-xl border"
-          onClick={load}
-          disabled={loading}
-        >
-          {loading ? "Cargando…" : "Recargar"}
-        </button>
-      </div>
 
-      {/* Filtros */}
-      <div className="grid grid-cols-1 gap-2">
-        <input
-          className="px-3 py-2 rounded-xl border bg-white"
-          placeholder="Buscar por nombre o teléfono"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <div className="grid grid-cols-3 gap-2">
-          <select
-            className="px-3 py-2 rounded-xl border bg-white"
-            value={filterPay}
-            onChange={(e) => setFilterPay(e.target.value as any)}
-          >
-            <option value="">Pago: todos</option>
+        <div className="flex gap-2">
+          <select className="px-3 py-2 rounded-xl border" value={filter} onChange={(e) => setFilter(e.target.value as any)}>
+            <option value="ALL">Todos</option>
             <option value="PAID">Pagados</option>
-            <option value="PENDING">Pendiente</option>
-            <option value="WAIVED">Cortesía</option>
+            <option value="CHECKED_IN">Asistieron</option>
           </select>
-          <select
-            className="px-3 py-2 rounded-xl border bg-white"
-            value={filterCheck}
-            onChange={(e) => setFilterCheck(e.target.value as any)}
-          >
-            <option value="">Check: todos</option>
-            <option value="CHECKED_IN">Check-in</option>
-            <option value="NONE">Sin check-in</option>
-          </select>
-          <select
-            className="px-3 py-2 rounded-xl border bg-white"
-            value={filterDuty}
-            onChange={(e) => setFilterDuty(e.target.value)}
-          >
-            <option value="">Responsabilidad: todas</option>
-            {DUTIES.filter(Boolean).map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
+          <button className="px-3 py-2 rounded-xl border" onClick={load} disabled={loading}>
+            {loading ? "Cargando…" : "Recargar"}
+          </button>
         </div>
       </div>
 
-      {/* Cero-estado */}
-      {loading && <div>Cargando…</div>}
-      {!loading && !event && (
-        <div className="p-3 rounded-2xl border bg-white">
-          No hay eventos. <a className="underline" href="/admin/event-new">Crear evento</a>
+      {/* controles globales */}
+      <div className="p-4 rounded-2xl border bg-white flex flex-col md:flex-row gap-3">
+        <div className="flex-1 flex gap-2">
+          <select className="px-3 py-2 rounded-xl border w-48" ref={dutyRef} defaultValue="">
+            <option value="">(Responsabilidad)</option>
+            <option value="ACCESO">Acceso</option>
+            <option value="BARRA">Barra</option>
+            <option value="VIP">Zona VIP</option>
+            <option value="LOGISTICA">Logística</option>
+          </select>
+
+          <input
+            type="text"
+            className="flex-1 px-3 py-2 rounded-xl border"
+            placeholder="Nota del admin"
+            ref={noteRef}
+          />
         </div>
-      )}
-      {!loading && event && filtered.length === 0 && (
-        <div className="p-3 rounded-2xl border bg-white">Aún no hay invitados con esos filtros.</div>
-      )}
+        <div className="text-xs text-gray-500">Elige una fila y pulsa “Guardar”.</div>
+      </div>
 
-      {/* Lista */}
-      <div className="space-y-2">
-        {filtered.map((r) => {
-          const payCls =
-            r.payment_status === "PAID"
-              ? "bg-green-100 text-green-700"
-              : r.payment_status === "WAIVED"
-              ? "bg-blue-100 text-blue-700"
-              : "bg-amber-100 text-amber-700";
-
-          const ck = r.checkin_status ?? "NONE";
-          const ckCls =
-            ck === "CHECKED_IN"
-              ? "bg-green-100 text-green-700"
-              : "bg-gray-100 text-gray-700";
-
-          // valores editables controlados por ref local (evitamos re-render por fila)
-          const dutyRef = React.useRef<HTMLInputElement | null>(null);
-          const noteRef = React.useRef<HTMLInputElement | null>(null);
-
-          return (
-            <div key={r.id} className="p-3 rounded-2xl border bg-white">
-              <div className="flex justify-between gap-2">
-                <div>
-                  <div className="font-medium">{r.profiles?.full_name ?? "(sin nombre)"}</div>
-                  <div className="text-xs text-gray-500">{r.profiles?.phone_e164 ?? ""}</div>
-                </div>
-                <div className="text-right space-y-1">
-                  <div>{badge(r.payment_status, payCls)}</div>
-                  <div>{badge(ck, ckCls)}</div>
-                </div>
-              </div>
-
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div className="md:col-span-1">
-                  <label className="block text-xs text-gray-500 mb-1">Responsabilidad</label>
-                  <select
-                    defaultValue={r.duty ?? ""}
-                    className="w-full px-2 py-2 rounded-xl border"
-                    ref={(el) => (dutyRef.current = el)}
-                  >
-                    {DUTIES.map((d) => (
-                      <option key={d} value={d}>
-                        {d || "Sin responsabilidad"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-gray-500 mb-1">Nota</label>
-                  <input
-                    defaultValue={r.duty_note ?? ""}
-                    placeholder="Detalle: hora, puesto, etc."
-                    className="w-full px-3 py-2 rounded-xl border"
-                    ref={(el) => (noteRef.current = el)}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-2 flex justify-end">
-                <button
-                  className="px-3 py-2 rounded-xl border"
-                  disabled={savingId === r.id}
-                  onClick={() =>
-                    saveDuty(r, dutyRef.current?.value ?? "", noteRef.current?.value ?? "")
-                  }
-                >
-                  {savingId === r.id ? "Guardando…" : "Guardar"}
-                </button>
-              </div>
-            </div>
-          );
-        })}
+      {/* tabla */}
+      <div className="rounded-2xl border bg-white overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="text-left px-3 py-2">Invitado</th>
+              <th className="text-left px-3 py-2">Teléfono</th>
+              <th className="text-left px-3 py-2">Pago</th>
+              <th className="text-left px-3 py-2">Asistencia</th>
+              <th className="text-left px-3 py-2">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((t) => {
+              const profile = t.profiles?.[0];
+              return (
+                <tr key={t.id} className="border-t">
+                  <td className="px-3 py-2">{profile?.full_name ?? "(sin nombre)"}</td>
+                  <td className="px-3 py-2">{profile?.phone_e164 ?? "—"}</td>
+                  <td className="px-3 py-2">{t.payment_status ?? "PENDING"}</td>
+                  <td className="px-3 py-2">{t.checkin_status === "CHECKED_IN" ? "✅" : "—"}</td>
+                  <td className="px-3 py-2">
+                    <button className="px-3 py-1 rounded-xl border" onClick={() => assignDutyAndNote(t.id)}>
+                      Guardar
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr>
+                <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
+                  No hay invitados para mostrar.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

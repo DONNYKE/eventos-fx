@@ -70,20 +70,9 @@ export default function EventNewScreen() {
     // Validaciones
     if (!name.trim())         return setError("Ingresa el nombre del evento.");
     if (!startAt)             return setError("Selecciona fecha y hora de inicio.");
-    if (!endAt)               return setError("Selecciona fecha y hora de fin.");
+    if (!start_iso) return setError("Fecha/hora de inicio inválida.");
+// Eliminamos fin y zonas porque no existen en la tabla
 
-    const start_iso = toISOFromLocalInput(startAt);
-    const end_iso   = toISOFromLocalInput(endAt);
-    if (!start_iso || !end_iso) return setError("Fechas inválidas.");
-    if (new Date(end_iso) <= new Date(start_iso))
-      return setError("La hora de fin debe ser posterior al inicio.");
-
-    const zones = zonesText
-      .split(",")
-      .map(z => z.trim())
-      .filter(Boolean);
-
-    if (zones.length === 0) return setError("Define al menos una zona (ej. GENERAL, VIP).");
 
     setSubmitting(true);
     try {
@@ -94,17 +83,16 @@ export default function EventNewScreen() {
 
       // 1) Crear evento SIN flyer aún
       const { data: ev, error: insErr } = await supabase
-        .from("events")
-        .insert({
-          name: name.trim(),
-          venue: venue.trim() || null,
-          start_at: start_iso,
-          end_at: end_iso,
-          zones,
-          created_by: userId,
-        })
-        .select("id")
-        .single();
+  .from("events")
+  .insert({
+    title: name.trim(),                 // <- antes name
+    location: venue.trim() || null,     // <- antes venue
+    start_at: start_iso,                // OK
+    is_active: true,                    // opcional, default true
+    created_by: userId,                 // OK
+  })
+  .select("id")
+  .single();
 
       if (insErr) throw insErr;
       const eventId = ev!.id as string;
@@ -123,9 +111,10 @@ export default function EventNewScreen() {
         const publicUrl = supabase.storage.from("event-flyers").getPublicUrl(path).data.publicUrl;
 
         const { error: updErr } = await supabase
-          .from("events")
-          .update({ flyer_path: path, flyer_url: publicUrl })
-          .eq("id", eventId);
+  .from("events")
+  .update({ banner_url: publicUrl }) // tu columna real
+  .eq("id", eventId);
+
 
         if (updErr) throw updErr;
       }

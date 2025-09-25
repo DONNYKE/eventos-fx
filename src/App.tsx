@@ -2,6 +2,17 @@ import React from "react";
 import { MyPassScreen } from "./screens/MyPassScreen";
 import { ScannerScreen } from "./screens/ScannerScreen";
 import { DashboardMini } from "./screens/DashboardMini";
+import InstallPWAButton from "./components/InstallPWAButton";
+
+export default function App() {
+  return (
+    <div className="p-4 space-y-4">
+      <h1 className="text-xl font-bold">Eventos FX</h1>
+      <InstallPWAButton />
+      {/* ...resto de tu UI */}
+    </div>
+  );
+}
 
 
 export default function App() {

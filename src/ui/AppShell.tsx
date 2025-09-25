@@ -2,6 +2,7 @@
 import React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import { APP_VERSION } from "../version";
 
 type Role = "ADMIN" | "SOCIO" | null;
 
@@ -15,19 +16,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // Carga inicial de sesión y rol + suscripción a cambios de auth
   React.useEffect(() => {
-    let unsub: { subscription: { unsubscribe: () => void } } | null = null;
-
-    const load = async () => {
+    let subscription: ReturnType<typeof supabase.auth.onAuthStateChange> | null = null;
+    async function load() {
       const { data } = await supabase.auth.getSession();
-      const session = !!data.session;
-      setHasSession(session);
-
+      const session = data.session;
+      setHasSession(!!session);
       if (session) {
-        setLoadingRole(true);
         const { data: prof } = await supabase
           .from("profiles")
           .select("app_role")
-          .eq("id", data.session!.user.id)
+          .eq("id", session.user.id)
           .single();
         setRole((prof?.app_role as Role) ?? "SOCIO");
         setLoadingRole(false);
@@ -35,30 +33,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setRole(null);
         setLoadingRole(false);
       }
-
-      // escuchar cambios de autenticación
-      unsub = supabase.auth.onAuthStateChange((_e, s) => {
-        const logged = !!s;
-        setHasSession(logged);
-        if (!logged) {
-          setRole(null);
-          nav("/login");
-        } else {
-          (async () => {
-            const { data: prof } = await supabase
-              .from("profiles")
-              .select("app_role")
-              .eq("id", s.user.id)
-              .single();
-            setRole((prof?.app_role as Role) ?? "SOCIO");
-          })();
-        }
+      subscription = supabase.auth.onAuthStateChange((_e, s) => {
+        setHasSession(!!s?.session);
       });
-    };
-
+    }
     load();
     return () => {
-      unsub?.subscription?.unsubscribe();
+      // @ts-ignore
+      subscription?.data?.subscription?.unsubscribe?.();
     };
   }, [nav]);
 
@@ -75,15 +57,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="max-w-md mx-auto flex items-center justify-between p-3 gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <Link className={tabClass("/pass")} to="/pass">Mi Pase</Link>
-            <Link className={tabClass("/scan")} to="/scan">Escáner</Link>
-            <Link className={tabClass("/dash")} to="/dash">Dashboard</Link>
+            <Link className={tabClass("/scanner")} to="/scanner">Escáner</Link>
+            <Link className={tabClass("/dashboard")} to="/dashboard">Dashboard</Link>
+            <Link className={tabClass("/app")} to="/app">Instalar app</Link>
 
+            {/* Instalar */}
+            <Link className={tabClass("/app")} to="/app">Instalar app</Link>
             {/* Link al panel de administración solo para ADMIN */}
             {hasSession && !loadingRole && role === "ADMIN" && (
               <Link className={tabClass("/admin")} to="/admin">Admin</Link>
             )}
           </div>
-
+<footer className="max-w-md mx-auto text-center text-[11px] text-gray-400 py-3">
+  Eventos FX — build {APP_VERSION} · <a href="?nosw=1" className="underline">apagar SW</a> · <a href="?nosw=0" className="underline">encender SW</a>
+</footer>
           <div className="flex items-center gap-2">
             {!hasSession ? (
               <Link className="px-3 py-2 rounded-xl border" to="/login">
@@ -107,5 +94,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <main className="max-w-md mx-auto">{children}</main>
     </div>
+    
   );
 }
